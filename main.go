@@ -358,14 +358,12 @@ func getDeviceList() []string {
 		}
 		return deviceList
 	}
-	nvmeNamespaceList := gjson.Get(string(nvmeDeviceCmd), "Devices.#.Subsystems.#.Controllers.#.Namespaces.#.NameSpace")
-	if len(nvmeNamespaceList.Array()) > 0 {
-		for _, controller := range nvmeNamespaceList.Array() {
-			for _, namespaces := range controller.Array() {
-				for _, namespaceList := range namespaces.Array() {
-					for _, namespace := range namespaceList.Array() {
-						deviceList = append(deviceList, "/dev/"+namespace.String())
-					}
+	devices := gjson.Get(string(nvmeDeviceCmd), "Devices.#.Subsystems.#.Namespaces.#.NameSpace")
+	if len(devices.Array()) > 0 {
+		for _, subsystems := range devices.Array() {
+			for _, namespaces := range subsystems.Array() {
+				for _, namespace := range namespaces.Array() {
+					deviceList = append(deviceList, "/dev/"+namespace.String())
 				}
 			}
 		}
