@@ -282,6 +282,7 @@ func (c *nvmeCollector) makeMetric(description *prometheus.Desc, valType prometh
 	if strings.Contains(substring, "temperature") {
 		// Leave it alone, if it's in Kelvin
 		if *c.temperatureScale == "celsius" {
+		if *c.temperatureScale == "celcius" {
 			value = value - 273
 		}
 		if *c.temperatureScale == "fahrenheit" {
@@ -415,6 +416,7 @@ func (c *nvmeCollector) Collect(ch chan<- prometheus.Metric) {
 		log.Fatalf("Error running nvme command: %s\n", err)
 	}
 	nvmeDeviceList := getDeviceList(string(nvmeListOutput))
+  
 	for _, nvmeDevice := range nvmeDeviceList {
 		nvmeSmartLog, err := exec.Command("nvme", "smart-log", nvmeDevice, "-o", "json").Output()
 		nvmeSmartLogText := string(nvmeSmartLog)
@@ -475,7 +477,6 @@ func (c *nvmeCollector) Collect(ch chan<- prometheus.Metric) {
 func main() {
 	port := flag.String("port", "9998", "port to listen on")
 	temperatureScale := flag.String("temperature_scale", "celsius", "One of : [celsius | fahrenheit | kelvin]. NVMe standard recommens Kelvin.")
-	log.Printf("Starting..")
 	flag.Parse()
 	// check user
 	currentUser, err := user.Current()
