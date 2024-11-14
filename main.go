@@ -280,7 +280,7 @@ func (c *nvmeCollector) Describe(ch chan<- *prometheus.Desc) {
 func (c *nvmeCollector) makeMetric(description *prometheus.Desc, valType prometheus.ValueType, result string, substring string, label string) prometheus.Metric {
 	value := gjson.Get(result, substring).Float()
 	if strings.Contains(substring, "temperature") {
-		// Leave it alone, if it's in Kelvin
+		// Leave it alone, if it's in Kelvin, change if it's celsius or fahrenheit
 		if *c.temperatureScale == "celsius" {
 			value = value - 273
 		}
