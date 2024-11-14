@@ -69,7 +69,6 @@ func newNvmeCollector(temperatureScale *string) prometheus.Collector {
 		sensorDescriptions = append(sensorDescriptions, description)
 	}
 
-	fmt.Sprintf("temperature scale: %s", temperatureScale)
 	return &nvmeCollector{
 		temperatureScale: temperatureScale,
 		nvmeCriticalWarning: prometheus.NewDesc(
@@ -281,7 +280,8 @@ func (c *nvmeCollector) Describe(ch chan<- *prometheus.Desc) {
 func (c *nvmeCollector) makeMetric(description *prometheus.Desc, valType prometheus.ValueType, result string, substring string, label string) prometheus.Metric {
 	value := gjson.Get(result, substring).Float()
 	if strings.Contains(substring, "temperature") {
-		// Leave it alone, if it's in Kelvin
+		// Leave it alone, if it's in Kelvin, change if it's celsius or fahrenheit
+		if *c.temperatureScale == "celsius" {
 		if *c.temperatureScale == "celcius" {
 			value = value - 273
 		}
@@ -292,83 +292,47 @@ func (c *nvmeCollector) makeMetric(description *prometheus.Desc, valType prometh
 	return prometheus.MustNewConstMetric(description, valType, value, label)
 }
 
-func getDeviceList() []string {
-	/*
-		Modern versions of nvme-cli use 64bit ints for sizes, but have a new JSON format
-		Old version:
-		#  nvme list -o json | jq '.Devices[0]'
-		{
-		  "NameSpace": 1,
-		  "DevicePath": "/dev/nvme0n1",
-		  "Firmware": "XXXXXXXX",
-		  "ModelNumber": "XXXXXXX",
-		  "SerialNumber": "XXXXXXX",
-		  "UsedBytes": -2147483648,
-		  "MaximumLBA": 1875385008,
-		  "PhysicalSize": -2147483648,
-		  "SectorSize": 512
-		}
-		New version:
-		{
-		  "HostNQN": "nqn.2014-08.org.nvmexpress:uuid:XXXXXXX",
-		  "HostID": "XXXXXXX",
-		  "Subsystems": [
-		    {
-		      "Subsystem": "nvme-subsys0",
-		      "SubsystemNQN": "nqn.2016-08.com.micron:nvme:nvm-subsystem-sn-XXXXX",
-		      "Controllers": [
-		        {
-		          "Controller": "nvme0",
-		          "Cntlid": "0",
-		          "SerialNumber": "XXXXXX",
-		          "ModelNumber": "XXXXX",
-		          "Firmware": "XXXXX",
-		          "Transport": "pcie",
-		          "Address": "0000:02:00.0",
-		          "Slot": "9",
-		          "Namespaces": [
-		            {
-		              "NameSpace": "nvme0n1",
-		              "Generic": "ng0n1",
-		              "NSID": 1,
-		              "UsedBytes": 2097152,
-		              "MaximumLBA": 25004872368,
-		              "PhysicalSize": 12802494652416,
-		              "SectorSize": 512
-		            }
-		          ],
-		          "Paths": []
-		        }
-		      ],
-		      "Namespaces": []
-		    },...
-	*/
-	nvmeDeviceCmd, err := exec.Command("nvme", "list", "-o", "json").Output()
-	if err != nil {
-		log.Fatalf("Error running nvme command: %s\n", err)
-	}
-	if !gjson.Valid(string(nvmeDeviceCmd)) {
-		log.Fatal("nvmeDeviceCmd json is not valid")
+func getDeviceList(nvmeListOutput string) []string {
+	// There are three possible formats for
+	if !gjson.Valid(string(nvmeListOutput)) {
+		log.Fatalf("nvmeListOutput json is not valid\n%s", nvmeListOutput)
 	}
 	var deviceList []string
-	nvmeJsonDeviceList := gjson.Get(string(nvmeDeviceCmd), "Devices.#.DevicePath").Array()
+	nvmeJsonDeviceList := gjson.Get(string(nvmeListOutput), "Devices.#.DevicePath").Array()
 	if len(nvmeJsonDeviceList) > 0 {
+		log.Printf("with devicepath Devices: %v\n", nvmeJsonDeviceList)
 		for _, devicePath := range nvmeJsonDeviceList {
 			deviceList = append(deviceList, devicePath.String())
 		}
 		return deviceList
 	}
-	nvmeNamespaceList := gjson.Get(string(nvmeDeviceCmd), "Devices.#.Subsystems.#.Controllers.#.Namespaces.#.NameSpace")
-	if len(nvmeNamespaceList.Array()) > 0 {
-		for _, controller := range nvmeNamespaceList.Array() {
-			for _, namespaces := range controller.Array() {
-				for _, namespaceList := range namespaces.Array() {
-					for _, namespace := range namespaceList.Array() {
+	devices := gjson.Get(string(nvmeListOutput), "Devices.#.Subsystems.#.Namespaces.#.NameSpace")
+	if len(devices.Array()) > 0 {
+		for _, subsystems := range devices.Array() {
+			for _, namespaces := range subsystems.Array() {
+				for _, namespace := range namespaces.Array() {
+					deviceList = append(deviceList, "/dev/"+namespace.String())
+				}
+			}
+		}
+	}
+	if len(deviceList) > 0 {
+		log.Printf("without controller Devices: %v\n", deviceList)
+		return deviceList
+	}
+	// Some machines have multiple controllers, and 'nvme list -o json' adds them in, changing the output format
+	devices = gjson.Get(string(nvmeListOutput), "Devices.#.Subsystems.#.Controllers.#.Namespaces.#.NameSpace")
+	if len(devices.Array()) > 0 {
+		for _, subsystems := range devices.Array() {
+			for _, controllers := range subsystems.Array() {
+				for _, namespaces := range controllers.Array() {
+					for _, namespace := range namespaces.Array() {
 						deviceList = append(deviceList, "/dev/"+namespace.String())
 					}
 				}
 			}
 		}
+		log.Printf("with controller Devices: %v\n", deviceList)
 		return deviceList
 	} else {
 		log.Fatal("No NVMe Devices found \n")
@@ -447,7 +411,12 @@ func (c *nvmeCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 
 	*/
-	nvmeDeviceList := getDeviceList()
+	nvmeListOutput, err := exec.Command("nvme", "list", "-o", "json").Output()
+	if err != nil {
+		log.Fatalf("Error running nvme command: %s\n", err)
+	}
+	nvmeDeviceList := getDeviceList(string(nvmeListOutput))
+  
 	for _, nvmeDevice := range nvmeDeviceList {
 		nvmeSmartLog, err := exec.Command("nvme", "smart-log", nvmeDevice, "-o", "json").Output()
 		nvmeSmartLogText := string(nvmeSmartLog)
@@ -507,7 +476,7 @@ func (c *nvmeCollector) Collect(ch chan<- prometheus.Metric) {
 
 func main() {
 	port := flag.String("port", "9998", "port to listen on")
-	temperatureScale := flag.String("temperature_scale", "fahrenheit", "One of : [celcius | fahrenheit | kelvin]. NVMe standard recommens Kelvin.")
+	temperatureScale := flag.String("temperature_scale", "celsius", "One of : [celsius | fahrenheit | kelvin]. NVMe standard recommens Kelvin.")
 	flag.Parse()
 	// check user
 	currentUser, err := user.Current()
