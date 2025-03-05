@@ -1,4 +1,17 @@
+# FORK
+
+This is a fork of https://github.com/fritchie/nvme_exporter 
+
+Thanks for Frank Ritchie and John Looney for the original work
+
+This repository includes bugfixes, as the original repository is not maintained any more.
+
+# Image (from this repository)
+
+The image is available as ghcr.io/elek/nvme_exporter
+
 # nvme_exporter
+
 Prometheus exporter for nvme smart-log metrics
 
 ## Building and running
