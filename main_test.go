@@ -1,14 +1,15 @@
-package main
+package nvmereceiver
 
 import (
-	"github.com/prometheus/client_golang/prometheus"
 	"reflect"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestNewNvmeCollector(t *testing.T) {
 	temperatureScale := "celsius"
-	collector := newNvmeCollector(&temperatureScale)
+	collector := newNvmeCollector(nil, &temperatureScale)
 
 	if collector == nil {
 		t.Fatalf("Expected newNvmeCollector to return a non-nil value")
@@ -17,7 +18,7 @@ func TestNewNvmeCollector(t *testing.T) {
 
 func TestNvmeCollector_Describe(t *testing.T) {
 	temperatureScale := "celsius"
-	collector := newNvmeCollector(&temperatureScale).(*nvmeCollector)
+	collector := newNvmeCollector(nil, &temperatureScale).(*nvmeCollector)
 
 	ch := make(chan *prometheus.Desc)
 	go func() {

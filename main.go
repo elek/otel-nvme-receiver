@@ -1,18 +1,16 @@
-package main
+package nvmereceiver
 
 // Export nvme smart-log metrics in prometheus format
 
 import (
-	"flag"
 	"fmt"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/tidwall/gjson"
 	"log"
-	"net/http"
 	"os/exec"
-	"os/user"
 	"strings"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 )
 
 var (
@@ -52,12 +50,13 @@ type nvmeCollector struct {
 	nvmeThmTemp1TotalTime                  *prometheus.Desc
 	nvmeThmTemp2TotalTime                  *prometheus.Desc
 	temperatureScale                       *string
+	logger                                 *zap.Logger
 }
 
 // nvme smart-log field descriptions can be found on page 180 of:
 // https://nvmexpress.org/wp-content/uploads/NVM-Express-Base-Specification-2_0-2021.06.02-Ratified-5.pdf
 
-func newNvmeCollector(temperatureScale *string) prometheus.Collector {
+func newNvmeCollector(logger *zap.Logger, temperatureScale *string) prometheus.Collector {
 	var sensorDescriptions []*prometheus.Desc
 	for i := 1; i <= maxTempSensors; i++ {
 		description := prometheus.NewDesc(
@@ -70,6 +69,7 @@ func newNvmeCollector(temperatureScale *string) prometheus.Collector {
 	}
 
 	return &nvmeCollector{
+		logger:           logger,
 		temperatureScale: temperatureScale,
 		nvmeCriticalWarning: prometheus.NewDesc(
 			"nvme_critical_warning",
@@ -291,10 +291,11 @@ func (c *nvmeCollector) makeMetric(description *prometheus.Desc, valType prometh
 	return prometheus.MustNewConstMetric(description, valType, value, label)
 }
 
-func getDeviceList(nvmeListOutput string) []string {
+func (c *nvmeCollector) getDeviceList(nvmeListOutput string) []string {
 	// There are three possible formats for
 	if !gjson.Valid(string(nvmeListOutput)) {
-		log.Fatalf("nvmeListOutput json is not valid\n%s", nvmeListOutput)
+		c.logger.Error("nvmeListOutput json is not valid (are you root?)")
+		return []string{}
 	}
 	var deviceList []string
 	nvmeJsonDeviceList := gjson.Get(string(nvmeListOutput), "Devices.#.DevicePath").Array()
@@ -334,7 +335,7 @@ func getDeviceList(nvmeListOutput string) []string {
 		log.Printf("with controller Devices: %v\n", deviceList)
 		return deviceList
 	} else {
-		log.Fatal("No NVMe Devices found \n")
+		c.logger.Warn("No NVMe Devices found")
 		return nil
 	}
 }
@@ -412,18 +413,20 @@ func (c *nvmeCollector) Collect(ch chan<- prometheus.Metric) {
 	*/
 	nvmeListOutput, err := exec.Command("nvme", "list", "-o", "json").Output()
 	if err != nil {
-		log.Fatalf("Error running nvme command: %s\n", err)
+		c.logger.Error("Error running nvme command", zap.String("command", "nvme list -o json"), zap.Error(err))
 	}
-	nvmeDeviceList := getDeviceList(string(nvmeListOutput))
+	nvmeDeviceList := c.getDeviceList(string(nvmeListOutput))
 
 	for _, nvmeDevice := range nvmeDeviceList {
 		nvmeSmartLog, err := exec.Command("nvme", "smart-log", nvmeDevice, "-o", "json").Output()
 		nvmeSmartLogText := string(nvmeSmartLog)
 		if err != nil {
-			log.Fatalf("Error running nvme smart-log command for device %s: %s\n", nvmeDevice, err)
+			c.logger.Error("Error running nvme smart-log command for device (are you root?)", zap.String("device", nvmeDevice), zap.Error(err))
+			continue
 		}
 		if !gjson.Valid(nvmeSmartLogText) {
-			log.Fatalf("nvmeSmartLog json is not valid for device: %s: %s\n", nvmeDevice, err)
+			c.logger.Error("nvmeSmartLog json is not valid for device", zap.String("device", nvmeDevice), zap.Error(err))
+			continue
 		}
 
 		nvmeCriticalWarning := gjson.Get(nvmeSmartLogText, "critical_warning")
@@ -471,26 +474,4 @@ func (c *nvmeCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- c.makeMetric(c.nvmeThmTemp1TotalTime, prometheus.CounterValue, nvmeSmartLogText, "thm_temp3_total_time", nvmeDevice)
 		ch <- c.makeMetric(c.nvmeThmTemp2TotalTime, prometheus.CounterValue, nvmeSmartLogText, "thm_temp1_total_time", nvmeDevice)
 	}
-}
-
-func main() {
-	port := flag.String("port", "9998", "port to listen on")
-	temperatureScale := flag.String("temperature_scale", "celsius", "One of : [celsius | fahrenheit | kelvin]. NVMe standard recommens Kelvin.")
-	flag.Parse()
-	// check user
-	currentUser, err := user.Current()
-	if err != nil {
-		log.Fatalf("Error getting current user  %s\n", err)
-	}
-	if currentUser.Username != "root" {
-		log.Fatalln("Error: you must be root to use nvme-cli")
-	}
-	// check for nvme-cli executable
-	_, err = exec.LookPath("nvme")
-	if err != nil {
-		log.Fatalf("Cannot find nvme command in path: %s\n", err)
-	}
-	prometheus.MustRegister(newNvmeCollector(temperatureScale))
-	http.Handle("/metrics", promhttp.Handler())
-	log.Fatal(http.ListenAndServe(":"+*port, nil))
 }
