@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type SmartctlReceiver struct {
+type NvmeReceiver struct {
 	consumer consumer.Metrics
 	cancel   context.CancelFunc
 	config   *Config
@@ -18,7 +18,7 @@ type SmartctlReceiver struct {
 	producer *Producer
 }
 
-func (s *SmartctlReceiver) Start(ctx context.Context, host component.Host) error {
+func (s *NvmeReceiver) Start(ctx context.Context, host component.Host) error {
 	ctx = context.Background()
 	ctx, s.cancel = context.WithCancel(ctx)
 
@@ -57,14 +57,14 @@ func (s *SmartctlReceiver) Start(ctx context.Context, host component.Host) error
 	return nil
 }
 
-func (s *SmartctlReceiver) Shutdown(ctx context.Context) error {
+func (s *NvmeReceiver) Shutdown(ctx context.Context) error {
 	if s.cancel != nil {
 		s.cancel()
 	}
 	return nil
 }
 
-func (s *SmartctlReceiver) refresh(ctx context.Context) {
+func (s *NvmeReceiver) refresh(ctx context.Context) {
 	metrics, err := s.producer.Produce(ctx)
 	if err != nil {
 		s.logger.Error("failed to gather metrics", zap.Error(err))

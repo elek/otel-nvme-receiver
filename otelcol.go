@@ -29,7 +29,7 @@ func NewFactory() receiver.Factory {
 }
 
 func createMetrics(ctx context.Context, settings receiver.Settings, config component.Config, consumer consumer.Metrics) (receiver.Metrics, error) {
-	return &SmartctlReceiver{
+	return &NvmeReceiver{
 		config:   config.(*Config),
 		consumer: consumer,
 		logger:   settings.Logger,
