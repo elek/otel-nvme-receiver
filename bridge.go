@@ -70,7 +70,7 @@ func (p *Producer) Produce(context.Context) (pmetric.Metrics, error) {
 func convertPrometheusMetricsInto(scope string, promMetrics []*dto.MetricFamily, metrics pmetric.ResourceMetrics, now time.Time) error {
 	var errs multierr
 	for _, pm := range promMetrics {
-		if pm.GetType() != dto.MetricType_GAUGE && pm.GetType() != dto.MetricType_COUNTER &&
+		if pm.GetType() != dto.MetricType_GAUGE && pm.GetType() != dto.MetricType_COUNTER && pm.GetType() != dto.MetricType_COUNTER &&
 			pm.GetType() != dto.MetricType_SUMMARY && pm.GetType() != dto.MetricType_HISTOGRAM {
 			errs = append(errs, fmt.Errorf("%w: %v for metric %v", errUnsupportedType, pm.GetType(), pm.GetName()))
 			continue
@@ -87,6 +87,8 @@ func convertPrometheusMetricsInto(scope string, promMetrics []*dto.MetricFamily,
 		m.SetName(pm.GetName())
 		m.SetDescription(pm.GetHelp())
 		switch pm.GetType() {
+		case dto.MetricType_UNTYPED:
+			convertUntyped(pm.GetMetric(), m, now)
 		case dto.MetricType_GAUGE:
 			convertGauge(pm.GetMetric(), m, now)
 		case dto.MetricType_COUNTER:
@@ -118,8 +120,24 @@ func convertGauge(metrics []*dto.Metric, pm pmetric.Metric, now time.Time) {
 	gauge := pm.SetEmptyGauge()
 	for _, m := range metrics {
 		dp := gauge.DataPoints().AppendEmpty()
-
 		dp.SetDoubleValue(m.GetGauge().GetValue())
+		convertLabels(m.GetLabel(), dp.Attributes())
+
+		if m.GetTimestampMs() != 0 {
+			dp.SetTimestamp(pcommon.NewTimestampFromTime(time.UnixMilli(m.GetTimestampMs())))
+		} else {
+			dp.SetTimestamp(pcommon.NewTimestampFromTime(now))
+		}
+	}
+}
+
+func convertUntyped(metrics []*dto.Metric, pm pmetric.Metric, now time.Time) {
+	gauge := pm.SetEmptyGauge()
+	for _, m := range metrics {
+		dp := gauge.DataPoints().AppendEmpty()
+		if m.GetUntyped() != nil {
+			dp.SetDoubleValue(m.GetUntyped().GetValue())
+		}
 		convertLabels(m.GetLabel(), dp.Attributes())
 
 		if m.GetTimestampMs() != 0 {
