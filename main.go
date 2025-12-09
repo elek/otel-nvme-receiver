@@ -56,7 +56,11 @@ type nvmeCollector struct {
 // nvme smart-log field descriptions can be found on page 180 of:
 // https://nvmexpress.org/wp-content/uploads/NVM-Express-Base-Specification-2_0-2021.06.02-Ratified-5.pdf
 
-func newNvmeCollector(logger *zap.Logger, temperatureScale *string) prometheus.Collector {
+func newNvmeCollector(logger *zap.Logger, temperatureScale *string) *nvmeCollector {
+	if temperatureScale == nil {
+		defaultScale := "celsius"
+		temperatureScale = &defaultScale
+	}
 	var sensorDescriptions []*prometheus.Desc
 	for i := 1; i <= maxTempSensors; i++ {
 		description := prometheus.NewDesc(
@@ -242,6 +246,8 @@ func newNvmeCollector(logger *zap.Logger, temperatureScale *string) prometheus.C
 		),
 	}
 }
+
+var _ prometheus.Collector = &nvmeCollector{}
 
 func (c *nvmeCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.nvmeCriticalWarning
