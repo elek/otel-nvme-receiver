@@ -420,6 +420,7 @@ func (c *nvmeCollector) Collect(ch chan<- prometheus.Metric) {
 	nvmeListOutput, err := exec.Command("nvme", "list", "-o", "json").Output()
 	if err != nil {
 		c.logger.Error("Error running nvme command", zap.String("command", "nvme list -o json"), zap.Error(err))
+		return
 	}
 	nvmeDeviceList := c.getDeviceList(string(nvmeListOutput))
 
